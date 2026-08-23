@@ -33,3 +33,4 @@ cmake -B build -S src && make -C build -j   # 在 AssignmentN/src 下
 
 - 代码中的中文注释是用户的学习笔记，新增代码时请保持同样的中文注释风格。
 - 提交信息习惯用英文，例如 `init: Assignment1 Learning Record`。
+- **不要直接修改/补全作业代码**：用户希望通过共同学习自己动手写代码。回答时应讲解思路、原理和函数用法（如 Eigen 的 API），可给骨架/伪代码和提示，由用户自己完成实现，不要直接写入代码文件。
