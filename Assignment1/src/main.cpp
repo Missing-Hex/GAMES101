@@ -58,6 +58,31 @@ Eigen::Matrix4f get_projection_matrix(float eye_fov, float aspect_ratio,
     return projection;
 }
 
+//绕任意过原点的轴旋转（罗德里格斯旋转公式）
+Eigen::Matrix4f get_rotation(Eigen::Vector3f axis, float rotation_angle)
+{
+    //归一化轴向量
+    Eigen::Vector3f n = axis.normalized();
+
+    //角度转弧度
+    float rad = rotation_angle / 180.0f * MY_PI;
+
+    //叉乘矩阵N
+    Eigen::Matrix3f N;
+    N << 0, -n.z(), n.y(),
+        n.z(), 0, -n.x(),
+        -n.y(), n.x(), 0;
+
+    //核心思想：绕任意轴旋转 = 平行分量不动 + 垂直分量在平面里做 2D 旋转
+    //R = cos·I + (1−cos)·n·nᵀ + sin·N
+    Eigen::Matrix3f R3 = std::cos(rad) * Eigen::Matrix3f::Identity() + (1 - std::cos(rad)) * n * n.transpose() + std::sin(rad) * N;
+
+    //将R3转换为4x4矩阵
+    Eigen::Matrix4f R = Eigen::Matrix4f::Identity();
+    R.block<3, 3>(0, 0) = R3;
+    return R;
+}
+
 int main(int argc, const char** argv)
 {
     float angle = 0;
@@ -100,7 +125,8 @@ int main(int argc, const char** argv)
     if (command_line) {
         r.clear(rst::Buffers::Color | rst::Buffers::Depth);
 
-        r.set_model(get_model_matrix(angle));
+        //r.set_model(get_model_matrix(angle));
+        r.set_model(get_rotation({1, 1, 1}, angle));
         r.set_view(get_view_matrix(eye_pos));
         r.set_projection(get_projection_matrix(45, 1, 0.1, 50));
 
@@ -118,7 +144,9 @@ int main(int argc, const char** argv)
         r.clear(rst::Buffers::Color | rst::Buffers::Depth);
         //帧循环（game loop）
         //每一帧重复四件事： 清屏 → 设置矩阵 → 画三角形 → 显示图片 → 处理按键
-        r.set_model(get_model_matrix(angle));
+        
+        //r.set_model(get_model_matrix(angle));
+        r.set_model(get_rotation({1, 1, 1}, angle));
         r.set_view(get_view_matrix(eye_pos));
         r.set_projection(get_projection_matrix(45, 1, 0.1, 50));
 
