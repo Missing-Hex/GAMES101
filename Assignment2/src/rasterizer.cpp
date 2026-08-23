@@ -40,9 +40,22 @@ auto to_vec4(const Eigen::Vector3f& v3, float w = 1.0f)
 }
 
 
-static bool insideTriangle(int x, int y, const Vector3f* _v)
+static bool insideTriangle(float x, float y, const Vector3f* _v)
 {   
     // TODO : Implement this function to check if the point (x, y) is inside the triangle represented by _v[0], _v[1], _v[2]
+    Vector3f P(x, y, 0);
+
+    auto cross2D = [](const Vector3f& A, const Vector3f& B, const Vector3f& P) -> float
+    {
+        return (B.x() - A.x()) * (P.y() - A.y()) - (B.y() - A.y()) * (P.x() - A.x());
+    };
+
+    float c1 = cross2D(_v[0], _v[1], P);
+    float c2 = cross2D(_v[1], _v[2], P);
+    float c3 = cross2D(_v[2], _v[0], P);
+
+    return (c1 >= 0 && c2 >= 0 && c3 >= 0) || (c1 <= 0 && c2 <= 0 && c3 <= 0);
+
 }
 
 static std::tuple<float, float, float> computeBarycentric2D(float x, float y, const Vector3f* v)
@@ -116,6 +129,71 @@ void rst::rasterizer::rasterize_triangle(const Triangle& t) {
     //z_interpolated *= w_reciprocal;
 
     // TODO : set the current pixel (use the set_pixel function) to the color of the triangle (use getColor function) if it should be painted.
+
+    int min_x = std::floor(std::min(v[0].x(), std::min(v[1].x(), v[2].x())));
+    int max_x = std::ceil(std::max(v[0].x(), std::max(v[1].x(), v[2].x())));
+    int min_y = std::floor(std::min(v[0].y(), std::min(v[1].y(), v[2].y())));
+    int max_y = std::ceil(std::max(v[0].y(), std::max(v[1].y(), v[2].y())));
+
+    const float offsets[4][2] = {
+        {0.25, 0.25}, {0.25, 0.75}, 
+        {0.75, 0.25}, {0.75, 0.75}
+    };
+
+    for(int x = min_x; x <= max_x; x++)
+    {
+        for(int y = min_y; y <= max_y; y++)
+        {
+            int count = 0; //该像素落在三角形上的采样点个数
+            for(int s = 0; s < 4; s++)
+            {
+                float sx = x + offsets[s][0];
+                float sy = y + offsets[s][1];
+                if(insideTriangle(sx, sy, t.v))
+                {
+                    auto [alpha, beta, gamma] = computeBarycentric2D(sx, sy, t.v);
+                    float w_reciprocal = 1.0/(alpha / v[0].w() + beta / v[1].w() + gamma / v[2].w());
+                    float z_interpolated = alpha * v[0].z() / v[0].w() + beta * v[1].z() / v[1].w() + gamma * v[2].z() / v[2].w();
+                    z_interpolated *= w_reciprocal;
+                    
+                    int index = get_index(x, y) * 4 + s;
+                    if(z_interpolated < sample_depth_buf[index])
+                    {
+                        sample_depth_buf[index] = z_interpolated;
+                        count++;
+                    }
+                }
+            }
+
+            if(count > 0)
+            {
+                set_pixel(Vector3f(x, y, 1), t.getColor() * count / 4.0f);
+            }   
+            
+            /*
+            if(insideTriangle(x, y, t.v))
+            {
+                auto [alpha, beta, gamma] = computeBarycentric2D(x, y, t.v); //重心坐标
+                float w_reciprocal = 1.0/(alpha / v[0].w() + beta / v[1].w() + gamma / v[2].w());
+                float z_interpolated = alpha * v[0].z() / v[0].w() + beta * v[1].z() / v[1].w() + gamma * v[2].z() / v[2].w();
+                z_interpolated *= w_reciprocal;
+                
+                透视投影下，屏幕空间里"看着是直线"的插值，对应到相机空
+                间其实不是线性的。正确做法是插值 z/w 而不是
+                z（所以公式里除以 w），最后再乘回
+                w_reciprocal。这就是"透视矫正插值"
+                
+                int index = get_index(x, y);
+                if(z_interpolated < depth_buf[index])
+                {
+                    depth_buf[index] = z_interpolated; //更新深度
+                    set_pixel(Vector3f(x, y, 1), t.getColor()); //写入帧缓冲
+                    //直接传屏幕坐标(x, y)，z写什么都会被忽略，传1即可
+                }
+            }
+            */
+        }
+    }
 }
 
 void rst::rasterizer::set_model(const Eigen::Matrix4f& m)
@@ -142,13 +220,15 @@ void rst::rasterizer::clear(rst::Buffers buff)
     if ((buff & rst::Buffers::Depth) == rst::Buffers::Depth)
     {
         std::fill(depth_buf.begin(), depth_buf.end(), std::numeric_limits<float>::infinity());
+        std::fill(sample_depth_buf.begin(), sample_depth_buf.end(), std::numeric_limits<float>::infinity());
     }
 }
 
 rst::rasterizer::rasterizer(int w, int h) : width(w), height(h)
 {
     frame_buf.resize(w * h);
-    depth_buf.resize(w * h);
+    depth_buf.resize(w * h); 
+    sample_depth_buf.resize(w * h * 4); //super-sampling
 }
 
 int rst::rasterizer::get_index(int x, int y)
