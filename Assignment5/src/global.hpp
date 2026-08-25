@@ -6,8 +6,9 @@
 
 #define M_PI 3.14159265358979323846
 
-constexpr float kInfinity = std::numeric_limits<float>::max();
+constexpr float kInfinity = std::numeric_limits<float>::max(); //constexpr为编译期常量，比宏更安全
 
+//头文件里的函数实现需要加inline
 inline float clamp(const float& lo, const float& hi, const float& v)
 {
     return std::max(lo, std::min(hi, v));
@@ -47,7 +48,7 @@ inline float get_random_float()
     return dist(rng);
 }
 
-inline void UpdateProgress(float progress)
+inline void UpdateProgress(float progress) //渲染进度条
 {
     int barWidth = 70;
 

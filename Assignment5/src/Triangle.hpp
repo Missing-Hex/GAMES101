@@ -11,7 +11,35 @@ bool rayTriangleIntersect(const Vector3f& v0, const Vector3f& v1, const Vector3f
     // that's specified bt v0, v1 and v2 intersects with the ray (whose
     // origin is *orig* and direction is *dir*)
     // Also don't forget to update tnear, u and v.
-    return false;
+
+    // O + t·D = v0 + u·E1 + v·E2    其中 E1 = v1−v0，E2 = v2−v0
+    // Cramer's rule
+    
+    Vector3f E1 = v1 - v0;
+    Vector3f E2 = v2 - v0;
+    Vector3f P = crossProduct(dir, E2);
+    float det = dotProduct(E1, P);
+
+    if(std::fabs(det) < 1e-8)
+        return false;
+
+    float invDet = 1.0f / det;
+
+    Vector3f T = orig - v0;
+    u = dotProduct(T, P) * invDet;
+    if(u < 0 || u > 1)
+        return false;
+    
+    Vector3f Q = crossProduct(T, E1);
+    v = dotProduct(dir, Q) * invDet;
+    if(v < 0 || u + v > 1)
+        return false;
+
+    tnear = dotProduct(E2, Q) * invDet;
+    if(tnear < 0)
+        return false;
+
+    return true;
 }
 
 class MeshTriangle : public Object
@@ -24,8 +52,8 @@ public:
             if (vertsIndex[i] > maxIndex)
                 maxIndex = vertsIndex[i];
         maxIndex += 1;
-        vertices = std::unique_ptr<Vector3f[]>(new Vector3f[maxIndex]);
-        memcpy(vertices.get(), verts, sizeof(Vector3f) * maxIndex);
+        vertices = std::unique_ptr<Vector3f[]>(new Vector3f[maxIndex]); //分配
+        memcpy(vertices.get(), verts, sizeof(Vector3f) * maxIndex); //拷贝
         vertexIndex = std::unique_ptr<uint32_t[]>(new uint32_t[numTris * 3]);
         memcpy(vertexIndex.get(), vertsIndex, sizeof(uint32_t) * numTris * 3);
         numTriangles = numTris;
@@ -81,5 +109,5 @@ public:
     std::unique_ptr<Vector3f[]> vertices;
     uint32_t numTriangles;
     std::unique_ptr<uint32_t[]> vertexIndex;
-    std::unique_ptr<Vector2f[]> stCoordinates;
+    std::unique_ptr<Vector2f[]> stCoordinates; //每个顶点的纹理坐标
 };

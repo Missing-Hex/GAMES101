@@ -28,13 +28,19 @@ Vector3f reflect(const Vector3f &I, const Vector3f &N)
 // [/comment]
 Vector3f refract(const Vector3f &I, const Vector3f &N, const float &ior)
 {
+    //Snell's Law: n₁·sinθ₁ = n₂·sinθ₂
+    //ior: 折射率 index of refraction
     float cosi = clamp(-1, 1, dotProduct(I, N));
     float etai = 1, etat = ior;
     Vector3f n = N;
+    /*
+    cosi < 0：I 和 N 夹角大于90°，光线迎面射向表面（外部 → 内部）。此时n₁=空气=1，n₂=材质的 ior，法线方向不变。cosi取反，变成正数，代表入射角余弦。
+    cosi ≥ 0：光线从材质内部往外走（内部 → 空气）。交换折射率（n₁=ior, n₂=1），并把法线翻转（n = - N），让"有效法线"始终迎着入射光
+    */
     if (cosi < 0) { cosi = -cosi; } else { std::swap(etai, etat); n= -N; }
     float eta = etai / etat;
     float k = 1 - eta * eta * (1 - cosi * cosi);
-    return k < 0 ? 0 : eta * I + (eta * cosi - sqrtf(k)) * n;
+    return k < 0 ? 0 : eta * I + (eta * cosi - sqrtf(k)) * n; //全反射与折射方向
 }
 
 // [comment]
@@ -88,7 +94,7 @@ std::optional<hit_payload> trace(
     std::optional<hit_payload> payload;
     for (const auto & object : objects)
     {
-        float tNearK = kInfinity;
+        float tNearK = kInfinity; //哨兵值
         uint32_t indexK;
         Vector2f uvK;
         if (object->intersect(orig, dir, tNearK, indexK, uvK) && tNearK < tNear)
@@ -125,35 +131,39 @@ Vector3f castRay(
         const Vector3f &orig, const Vector3f &dir, const Scene& scene,
         int depth)
 {
-    if (depth > scene.maxDepth) {
+    if (depth > scene.maxDepth) { //递归基
         return Vector3f(0.0,0.0,0.0);
     }
 
-    Vector3f hitColor = scene.backgroundColor;
+    Vector3f hitColor = scene.backgroundColor; //默认值：背景色
     if (auto payload = trace(orig, dir, scene.get_objects()); payload)
     {
-        Vector3f hitPoint = orig + dir * payload->tNear;
+        Vector3f hitPoint = orig + dir * payload->tNear; //交点坐标
         Vector3f N; // normal
         Vector2f st; // st coordinates
-        payload->hit_obj->getSurfaceProperties(hitPoint, dir, payload->index, payload->uv, N, st);
+        payload->hit_obj->getSurfaceProperties(hitPoint, dir, payload->index, payload->uv, N, st); //法线、纹理坐标
         switch (payload->hit_obj->materialType) {
-            case REFLECTION_AND_REFRACTION:
+            case REFLECTION_AND_REFRACTION: //玻璃：反射+折射
             {
                 Vector3f reflectionDirection = normalize(reflect(dir, N));
                 Vector3f refractionDirection = normalize(refract(dir, N, payload->hit_obj->ior));
+
+                //偏移两个起点防止自相交
                 Vector3f reflectionRayOrig = (dotProduct(reflectionDirection, N) < 0) ?
                                              hitPoint - N * scene.epsilon :
                                              hitPoint + N * scene.epsilon;
                 Vector3f refractionRayOrig = (dotProduct(refractionDirection, N) < 0) ?
                                              hitPoint - N * scene.epsilon :
                                              hitPoint + N * scene.epsilon;
+                
+                //两条光线各自递归求颜色
                 Vector3f reflectionColor = castRay(reflectionRayOrig, reflectionDirection, scene, depth + 1);
                 Vector3f refractionColor = castRay(refractionRayOrig, refractionDirection, scene, depth + 1);
-                float kr = fresnel(dir, N, payload->hit_obj->ior);
+                float kr = fresnel(dir, N, payload->hit_obj->ior); //反射率
                 hitColor = reflectionColor * kr + refractionColor * (1 - kr);
                 break;
             }
-            case REFLECTION:
+            case REFLECTION: //镜子：反射
             {
                 float kr = fresnel(dir, N, payload->hit_obj->ior);
                 Vector3f reflectionDirection = reflect(dir, N);
@@ -163,7 +173,7 @@ Vector3f castRay(
                 hitColor = castRay(reflectionRayOrig, reflectionDirection, scene, depth + 1) * kr;
                 break;
             }
-            default:
+            default: //漫反射：Phong
             {
                 // [comment]
                 // We use the Phong illumation model int the default case. The phong model
@@ -185,16 +195,19 @@ Vector3f castRay(
                     float LdotN = std::max(0.f, dotProduct(lightDir, N));
                     // is the point in shadow, and is the nearest occluding object closer to the object than the light itself?
                     auto shadow_res = trace(shadowPointOrig, lightDir, scene.get_objects());
-                    bool inShadow = shadow_res && (shadow_res->tNear * shadow_res->tNear < lightDistance2);
+                    bool inShadow = shadow_res && (shadow_res->tNear * shadow_res->tNear < lightDistance2); //阴影
+                    //阴影判定：从命中点朝光源打一根阴影光线，若有物体挡路且距离光源更近，则在阴影里
 
-                    lightAmt += inShadow ? 0 : light->intensity * LdotN;
-                    Vector3f reflectionDirection = reflect(-lightDir, N);
+                    lightAmt += inShadow ? 0 : light->intensity * LdotN; //漫反射累计，表示硬阴影
+                    Vector3f reflectionDirection = reflect(-lightDir, N); //高光
 
                     specularColor += powf(std::max(0.f, -dotProduct(reflectionDirection, dir)),
                         payload->hit_obj->specularExponent) * light->intensity;
                 }
 
                 hitColor = lightAmt * payload->hit_obj->evalDiffuseColor(st) * payload->hit_obj->Kd + specularColor * payload->hit_obj->Ks;
+                //漫反射项 + 高光项
+                //st为表面色
                 break;
             }
         }
@@ -223,14 +236,14 @@ void Renderer::Render(const Scene& scene)
         for (int i = 0; i < scene.width; ++i)
         {
             // generate primary ray direction
-            float x;
-            float y;
             // TODO: Find the x and y positions of the current pixel to get the direction
             // vector that passes through it.
             // Also, don't forget to multiply both of them with the variable *scale*, and
-            // x (horizontal) variable with the *imageAspectRatio*            
+            // x (horizontal) variable with the *imageAspectRatio* 
+            float x = (2 * (i + 0.5) / (float)scene.width - 1) * scale * imageAspectRatio; //x坐标           ;
+            float y = (1 - 2 * (j + 0.5) / (float)scene.height) * scale; //y坐标           ;
 
-            Vector3f dir = Vector3f(x, y, -1); // Don't forget to normalize this direction!
+            Vector3f dir = normalize(Vector3f(x, y, -1)); // Don't forget to normalize this direction!
             framebuffer[m++] = castRay(eye_pos, dir, scene, 0);
         }
         UpdateProgress(j / (float)scene.height);
