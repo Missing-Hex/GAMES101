@@ -246,6 +246,9 @@ static void createKeyTables(void)
                                           XkbUseCoreKbd);
 
         // Find the X11 key code -> GLFW key code mapping
+        // Fix: XkbGetKeyboard can return NULL on some X servers (e.g. WSLg/Xwayland),
+        // dereferencing it below caused a segfault - guard against it
+        if (descr)
         for (scancode = descr->min_key_code;  scancode <= descr->max_key_code;  scancode++)
         {
             memcpy(name, descr->names->keys[scancode].name, XkbKeyNameLength);
